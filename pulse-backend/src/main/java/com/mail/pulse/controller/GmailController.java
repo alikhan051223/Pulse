@@ -3,15 +3,20 @@ package com.mail.pulse.controller;
 import com.google.api.services.gmail.Gmail;
 import com.google.api.services.gmail.model.Draft;
 import com.google.api.services.gmail.model.Message;
+import com.mail.pulse.dto.EmailSummary;
 import com.mail.pulse.entity.GmailEntity;
 import com.mail.pulse.service.GmailService;
 import jakarta.mail.MessagingException;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Pageable;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
 import java.io.File;
 import java.io.IOException;
+import java.time.Instant;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -73,12 +78,22 @@ public class GmailController {
                     .body("Incremental sync is already running.");
         }
         try {
-            gmailService.syncNewEmails(); // Starts @Async background job
+            gmailService.syncNewEmails();
             return ResponseEntity.ok("Incremental sync started successfully.");
         } catch (Exception e) {
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
                     .body("Failed to start incremental sync: " + e.getMessage());
         }
+    }
+
+    @GetMapping("/summaries")
+    public Page<EmailSummary> getEmailSummaries(
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "20") int size) {
+
+        Pageable pageable = PageRequest.of(page, size);
+
+        return gmailService.getSummaries(pageable);
     }
 
     @PostMapping("/sync-new/stop")
@@ -211,5 +226,6 @@ public class GmailController {
     private String getCurrentUserEmail() throws IOException {
         return gmailClient.users().getProfile("me").execute().getEmailAddress();
     }
+
 }
 

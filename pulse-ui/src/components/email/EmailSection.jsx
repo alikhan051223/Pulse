@@ -1,4 +1,3 @@
-
 import EmailItem from './EmailItem'
 
 /**
@@ -11,7 +10,19 @@ export default function EmailSection({
     onSelectEmail,
     onFilter,
     onSyncNew,
+    isLoading = false,
+    hasMore = true,
+    setPage,
 }) {
+    const handleScroll = (e) => {
+        const { scrollTop, scrollHeight, clientHeight } = e.target;
+        const isNearBottom = scrollHeight - scrollTop <= clientHeight + 50;
+
+        if (isNearBottom && hasMore && !isLoading && setPage) {
+            setPage((prevPage) => prevPage + 1);
+        }
+    };
+
     return (
         <aside className="flex w-96 shrink-0 flex-col border-x border-white/10 bg-slate-900/50 backdrop-blur-xl">
             {/* Top header area of sidebar containing Filter and Sync New buttons */}
@@ -33,11 +44,25 @@ export default function EmailSection({
                 </button>
             </div>
 
-            {/* Email List Feed / Empty State */}
-            <div className="flex-1 overflow-y-auto p-3 space-y-2">
-                    <div className="flex h-48 items-center justify-center text-center text-sm text-slate-500">
-                        No emails found. Press pulse to save emails
+            {/* Scrollable Email Feed */}
+            <div
+                onScroll={handleScroll}
+                className="h-full overflow-y-auto flex flex-col divide-y divide-slate-800"
+            >
+                {emails.map((email) => (
+                    <EmailItem
+                        key={email.emailID}
+                        email={email}
+                        isSelected={email.emailID === selectedEmailId}
+                        onSelect={onSelectEmail}
+                    />
+                ))}
+
+                {isLoading && (
+                    <div className="p-3 text-center text-xs text-slate-400">
+                        Loading more emails...
                     </div>
+                )}
             </div>
         </aside>
     )

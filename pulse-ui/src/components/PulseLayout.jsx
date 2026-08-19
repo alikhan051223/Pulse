@@ -47,9 +47,49 @@ export default function PulseLayout() {
     const [activeFolder, setActiveFolder] = useState('inbox')
     const [searchQuery, setSearchQuery] = useState('')
 
+    // getting emails
+    const [emails, setEmails] = useState([])
+    const [page, setPage] = useState(0)
+    const [hasMore, setHasMore] = useState(true)
+    const [isLoading, setIsLoading] = useState(false)
+
+
     // ---------------------------------------------------------------------------
     // 2. Effects & Persistence
     // ---------------------------------------------------------------------------
+
+    // get page of emails on startUp
+    useEffect(() => {
+        if (!hasMore || isLoading) return;
+        setIsLoading(true);
+
+        const getEmailSummaries = async () => {
+            try {
+                const response = await fetch(`http://localhost:8080/api/emails/summaries?page=${page}&size=20`,  {
+                    method:'GET'})
+                if (!response.ok) {
+                    console.error('Failed to fetch summaries:', response.statusText);
+                    return;
+                }
+
+                const data = await response.json();
+                setEmails((prevEmails) => {
+
+                    const existingIds = new Set(prevEmails.map((e) => e.emailID));
+
+                    const newEmails = data.content.filter((e) => !existingIds.has(e.emailID));
+
+                    return [...prevEmails, ...newEmails]; })
+                setHasMore(!data.last);
+            } catch (error) {
+                console.error('Network error fetching summaries:', error);
+            } finally {
+                setIsLoading(false);
+            }
+        };
+
+        void getEmailSummaries();
+    }, [page]);
 
     // Sync layout preferences to localStorage
     useEffect(() => {
@@ -91,6 +131,30 @@ export default function PulseLayout() {
         }
     }, [isWindowOpen])
 
+    useEffect(() => {
+        if (!selectedEmailId) return;
+
+        const fetchFullEmail = async () => {
+            try {
+                const response = await fetch(`http://localhost:8080/api/emails/${selectedEmailId}`)
+
+                if (!response.ok) {
+                    console.error('Failed to get email')
+                }
+
+
+                const emailInfo = await response.json()
+                setViewData(emailInfo)
+                setCurrentView('VIEW_EMAIL')
+                console.log(emailInfo)
+
+            } catch (error) {
+                console.error('Error fetching full email:', error)
+            }
+        }
+        void fetchFullEmail()
+    }, [selectedEmailId])
+
     // ---------------------------------------------------------------------------
     // 3. Navigation & View Handlers
     // ---------------------------------------------------------------------------
@@ -103,12 +167,6 @@ export default function PulseLayout() {
         setSelectedEmailId(null)
         setViewData(null)
         setCurrentView('EMPTY')
-    }
-
-    const handleSelectEmail = (email) => {
-        setSelectedEmailId(email?.id || null)
-        setViewData(email)
-        setCurrentView('VIEW_EMAIL')
     }
 
     const handleCompose = () => {
@@ -185,9 +243,12 @@ export default function PulseLayout() {
 
     const emailFeedSidebarComponent = (
         <EmailSection
-            emails={[]}
+            emails={emails}
             selectedEmailId={selectedEmailId}
-            onSelectEmail={handleSelectEmail}
+            onSelectEmail={setSelectedEmailId}
+            isLoading={isLoading}
+            hasMore={hasMore}
+            setPage={setPage}
             onFilter={handleFilter}
             onSyncNew={handleSyncNew}
         />
@@ -200,7 +261,6 @@ export default function PulseLayout() {
 
             {/* Header */}
             <Header
-                brandName={brandName}
                 onPulse={handlePulse}
                 searchQuery={searchQuery}
                 onSearchChange={setSearchQuery}
@@ -242,12 +302,16 @@ export default function PulseLayout() {
                 {feedPosition === 'left' && emailFeedSidebarComponent}
 
                 {/* Center Main Reading / Content View */}
-                <main className="relative z-10 flex min-h-0 flex-1 p-5 transition-all duration-300 ease-in-out">
-                    <section className="flex h-full w-full flex-col rounded-xl border border-white/10 bg-slate-900/50 p-6 shadow-[inset_0_1px_0_0_rgba(255,255,255,0.06)] backdrop-blur-xl">
+                <main className="relative z-10 flex min-h-0 min-w-0 flex-1 overflow-hidden p-5 transition-all duration-300 ease-in-out">
+                    <section className="flex h-full w-full min-h-0 min-w-0 flex-col overflow-hidden rounded-xl border border-white/10 bg-slate-900/50 p-6 shadow-[inset_0_1px_0_0_rgba(255,
+  255,255,0.06)] backdrop-blur-xl">
                         {currentView === 'VIEW_EMAIL' && (
                             <EmailScreen
                                 email={viewData}
-                                onClose={() => setCurrentView('EMPTY')}
+                                onClose={() => {
+                                    setCurrentView('EMPTY')
+                                    setSelectedEmailId(null)
+                                }}
                             />
                         )}
 

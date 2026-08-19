@@ -4,6 +4,7 @@ import com.google.api.client.googleapis.json.GoogleJsonError;
 import com.google.api.client.googleapis.json.GoogleJsonResponseException;
 import com.google.api.services.gmail.Gmail;
 import com.google.api.services.gmail.model.*;
+import com.mail.pulse.dto.EmailSummary;
 import com.mail.pulse.repository.GmailRepository;
 import com.mail.pulse.entity.*;
 import com.mail.pulse.repository.TokenRepository;
@@ -22,6 +23,8 @@ import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.codec.binary.Base64;
 import org.jsoup.Jsoup;
 import org.jsoup.safety.Safelist;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
 import org.springframework.scheduling.annotation.Async;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.context.SecurityContextHolder;
@@ -229,6 +232,10 @@ public class GmailService {
         pulseMessage.setInlineAttachments(inlineAttachments);
 
         gmailRepository.save(pulseMessage);
+    }
+
+    public Page<EmailSummary> getSummaries(Pageable pageable) {
+        return gmailRepository.getSummaries(pageable);
     }
 
 

@@ -3,7 +3,6 @@
  * Renders top navigation bar containing branding, search input, compose action button, settings, and drawer toggle button.
  */
 export default function Header({
-    brandName = 'Pulse',
     onPulse,
     searchQuery,
     onSearchChange,
@@ -22,7 +21,7 @@ export default function Header({
                 >
                     <span className="h-2 w-2 rounded-full bg-blue-500 shadow-[0_0_8px_rgba(59,130,246,0.8)]" />
                     <span className="bg-gradient-to-r from-slate-100 via-blue-200 to-blue-400 bg-clip-text text-xl font-bold tracking-tight text-transparent">
-                        {brandName}
+                        Pulse
                     </span>
                 </button>
 
