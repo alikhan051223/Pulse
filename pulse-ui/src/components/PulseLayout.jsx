@@ -7,6 +7,8 @@ import EmailScreen from './ScreenViews/EmailScreen'
 import ComposeScreen from './ScreenViews/ComposeScreen'
 import SettingsScreen from './ScreenViews/SettingsScreen'
 import DefaultScreen from './ScreenViews/DefaultScreen'
+import { Toaster } from 'react-hot-toast'
+import toast from 'react-hot-toast'
 
 // Default mail navigation folders
 const NAV_ITEMS = [
@@ -57,7 +59,6 @@ export default function PulseLayout() {
     // ---------------------------------------------------------------------------
     // 2. Effects & Persistence
     // ---------------------------------------------------------------------------
-
     // get page of emails on startUp
     useEffect(() => {
         if (!hasMore || isLoading) return;
@@ -69,6 +70,9 @@ export default function PulseLayout() {
                     method:'GET'})
                 if (!response.ok) {
                     console.error('Failed to fetch summaries:', response.statusText);
+                    toast.error(`Failed to fetch summaries: ${response.statusText}`, {
+                        id: 'fetch-summaries-error-backend',
+                    });
                     return;
                 }
 
@@ -82,7 +86,10 @@ export default function PulseLayout() {
                     return [...prevEmails, ...newEmails]; })
                 setHasMore(!data.last);
             } catch (error) {
-                console.error('Network error fetching summaries:', error);
+                console.error('Error fetching summaries:', error.message);
+                toast.error(`Error fetching summaries: ${error.message}`, {
+                    id: 'fetch-summaries-error-frontend',
+            });
             } finally {
                 setIsLoading(false);
             }
@@ -100,7 +107,7 @@ export default function PulseLayout() {
         localStorage.setItem('pulse_feed_pos', feedPosition)
     }, [feedPosition])
 
-    // Poll backend sync status while the sync modal is active
+    // Poll backend sync status while the sync window is active
     useEffect(() => {
         if (!isWindowOpen) return
 
@@ -113,6 +120,7 @@ export default function PulseLayout() {
                     const isRunning = await response.json()
                     if (!isRunning) {
                         console.log('Sync completed automatically on backend.')
+                        toast.success('Sync complete!')
                         setIsWindowOpen(false)
                     }
                 }
@@ -131,6 +139,7 @@ export default function PulseLayout() {
         }
     }, [isWindowOpen])
 
+    // display a full email when a summary is selected
     useEffect(() => {
         if (!selectedEmailId) return;
 
@@ -141,7 +150,6 @@ export default function PulseLayout() {
                 if (!response.ok) {
                     console.error('Failed to get email')
                 }
-
 
                 const emailInfo = await response.json()
                 setViewData(emailInfo)
@@ -183,16 +191,10 @@ export default function PulseLayout() {
     // ---------------------------------------------------------------------------
 
     const handleFilter = () => {
-        // Implement filter actions if needed
-    }
-
-    const handleSyncNew = () => {
-        setIsWindowOpen(true)
+        // Implement filter
     }
 
     const stopFullSync = async () => {
-        setIsWindowOpen(false)
-
         try {
             const response = await fetch('http://localhost:8080/api/emails/save-all/stop', {
                 method: 'POST',
@@ -203,31 +205,35 @@ export default function PulseLayout() {
             if (!response.ok) {
                 throw new Error(`Failed to stop sync: ${response.status}`)
             }
-
-            console.log('Stop requested:', data)
+            setIsWindowOpen(false)
+            console.log('Sync cancelled', response)
+            toast.success(`Sync cancelled`)
         } catch (error) {
             console.error('Failure stopping sync:', error)
         }
     }
 
-    const handlePulse = async () => {
-        setIsWindowOpen(true)
-
+    const handleSyncNew = async () => {
+        const toastId = toast.loading('Loading...');
         try {
             const response = await fetch('http://localhost:8080/api/emails/save-all', {
                 method: 'POST',
             })
 
-            const textData = await response.text() // Use .text() for ResponseEntity<String>
+            const textData = await response.text()
 
             if (!response.ok) {
-                console.warn('Sync notice:', textData)
+                console.warn('Error:', textData)
+                toast.error(textData || `Server error (${response.status})`)
                 return
             }
 
+            toast.dismiss(toastId);
+            setIsWindowOpen(true)
             console.log('Sync initialized:', textData)
         } catch (error) {
             console.error('Failure starting sync:', error)
+            toast.error(error.message || 'Error saving emails')
         }
     }
 
@@ -259,9 +265,43 @@ export default function PulseLayout() {
             {/* Background glow effects */}
             <BackgroundGlow />
 
+            <Toaster
+                position="top-center"
+                toastOptions={{
+                    duration: 1500,
+                    // Global styling for all toasts
+                    style: {
+                        background: '#0f172a',
+                        color: '#f8fafc',
+                        border: '1px solid rgba(255, 255, 255, 0.1)',
+                        borderRadius: '0.75rem', // rounded-xl
+                        boxShadow: '0 20px 25px -5px rgba(0, 0, 0, 0.5)',
+                        fontSize: '0.875rem',
+                    },
+
+                    error: {
+                        style: {
+                            border: '1px solid rgba(239, 68, 68, 0.3)',
+                        },
+                        iconTheme: {
+                            primary: '#ef4444',
+                            secondary: '#0f172a',
+                        },
+                    },
+                    success: {
+                        style: {
+                            border: '1px solid rgba(34, 197, 94, 0.3)',
+                        },
+                        iconTheme: {
+                            primary: '#22c55e',
+                            secondary: '#0f172a',
+                        },
+                    },
+                }}
+            />
+
             {/* Header */}
             <Header
-                onPulse={handlePulse}
                 searchQuery={searchQuery}
                 onSearchChange={setSearchQuery}
                 onCompose={handleCompose}
@@ -269,22 +309,28 @@ export default function PulseLayout() {
                 onToggleNav={handleToggleNav}
             />
 
-
             {isWindowOpen && (
                 <div
-                    className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm"
+                    className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 p-4 backdrop-blur-none transition-all"
                 >
                     <div
                         onClick={(e) => e.stopPropagation()}
-                        className="bg-slate-900 rounded-xl shadow-2xl w-full max-w-md p-6 border border-slate-700"
+                        className="relative w-full max-w-md overflow-hidden rounded-xl border border-white/10 bg-slate-900/50 p-6 shadow-2xl backdrop-blur-xl shadow-[inset_0_1px_0_0_rgba(255,255,255,0.06)] text-slate-100"
                     >
-                        <h3 className="text-xl font-semibold text-gray-300 text-center mb-2">Syncing Emails...</h3>
-                        <p className="text-gray-300 mb-6 text-center ">This window will close automatically when done</p>
+                        <div className="flex flex-col items-center text-center">
+                            <h3 className="text-lg font-bold tracking-tight text-slate-100">
+                                Syncing Emails...
+                            </h3>
+                            <p className="mt-1 text-xs text-slate-400">
+                                This window will close automatically when finished.
+                            </p>
+                        </div>
 
-                        <div className="flex justify-center">
+                        <div className="mt-6 flex justify-center border-t border-white/10 pt-4">
                             <button
+                                type="button"
                                 onClick={stopFullSync}
-                                className="bg-slate-700 hover:bg-slate-600 text-gray-300 font-medium px-4 py-2 rounded-lg transition-colors"
+                                className="shrink-0 rounded-lg bg-blue-900 px-4 py-2 text-sm font-semibold text-white shadow-sm shadow-blue-600/20 transition hover:bg-blue-500 hover:shadow-blue-500/30"
                             >
                                 Cancel Sync
                             </button>

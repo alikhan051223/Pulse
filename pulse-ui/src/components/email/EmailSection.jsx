@@ -40,7 +40,7 @@ export default function EmailSection({
                     onClick={onSyncNew}
                     className="w-full rounded-lg border border-blue-500/40 bg-slate-900/40 px-4 py-2 text-sm font-medium text-blue-400 backdrop-blur-xl transition hover:border-blue-500/70 hover:bg-white/5 hover:shadow-[0_0_16px_rgba(59,130,246,0.2)]"
                 >
-                    Sync New
+                    Sync emails
                 </button>
             </div>
 

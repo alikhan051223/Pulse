@@ -16,10 +16,40 @@ export default function EmailView({ htmlContent }) {
     return (
         <iframe
             title="Email Content"
-            srcDoc={`<base target="_blank">${htmlContent}`}
+            /* keeps html centred */
+            srcDoc={` 
+        <!DOCTYPE html>
+        <html>
+            <head>
+                <meta charset="UTF-8">
+                <base target="_blank">
+                <style>
+                    html, body {
+                        margin: 0;
+                        padding: 0;
+                        width: 100%;
+                        height: 100%;
+                        background-color: #ffffff;
+                    }
+                   
+                    table {
+                        margin-left: auto;
+                        margin-right: auto;
+                    }
+                    
+                    img {
+                        max-width: 100%;
+                        height: auto;
+                    }
+                </style>
+            </head>
+            <body>
+                ${htmlContent}
+            </body>
+        </html>
+    `}
             sandbox="allow-popups allow-popups-to-escape-sandbox allow-same-origin"
             className="w-full h-full border-0 rounded-lg bg-white"
-
         />
     );
 }

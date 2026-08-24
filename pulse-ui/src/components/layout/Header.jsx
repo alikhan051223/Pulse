@@ -3,7 +3,6 @@
  * Renders top navigation bar containing branding, search input, compose action button, settings, and drawer toggle button.
  */
 export default function Header({
-    onPulse,
     searchQuery,
     onSearchChange,
     onCompose,
@@ -13,17 +12,12 @@ export default function Header({
     return (
         <header className="relative z-10 flex shrink-0 items-center gap-4 border-b border-white/10 bg-slate-900/50 px-5 py-3 backdrop-blur-xl">
             <div className="flex min-w-0 flex-1 items-center justify-center gap-6">
-                {/* Logo and brand identity block */}
-                <button
-                    type="button"
-                    onClick={onPulse}
-                    className="flex shrink-0 items-center gap-2 border-none bg-transparent p-0 cursor-pointer transition-opacity duration-200 hover:opacity-80"
-                >
+                <div className="flex shrink-0 items-center gap-2">
                     <span className="h-2 w-2 rounded-full bg-blue-500 shadow-[0_0_8px_rgba(59,130,246,0.8)]" />
                     <span className="bg-gradient-to-r from-slate-100 via-blue-200 to-blue-400 bg-clip-text text-xl font-bold tracking-tight text-transparent">
-                        Pulse
+                         Pulse
                     </span>
-                </button>
+                </div>
 
                 {/* Search input field and Compose action button */}
                 <div className="flex w-full max-w-md items-center gap-3">
