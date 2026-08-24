@@ -33,16 +33,25 @@ public class GmailEntity {
 
     private Instant dateSent;
 
+
+
+    @Column(columnDefinition = "TEXT")
     private String htmlBody;
 
+    @Column(columnDefinition = "TEXT")
     private String plainTextBody;
 
-    @OneToMany(cascade = CascadeType.ALL)
-    @JoinColumn(name = "email_id")
+    @OneToMany(mappedBy = "email", cascade = CascadeType.ALL, orphanRemoval = true)
     private List<Attachment> attachments = new ArrayList<>();
 
-    @OneToMany(cascade = CascadeType.ALL)
-    @JoinColumn(name = "inline_email_id")
-    private List<Attachment> inlineAttachments = new ArrayList<>();
+    public void addAttachment(Attachment attachment) {
+        attachments.add(attachment);
+        attachment.setEmail(this);
+    }
 
+
+    public void removeAttachment(Attachment attachment) {
+        attachments.remove(attachment);
+        attachment.setEmail(null);
+    }
 }

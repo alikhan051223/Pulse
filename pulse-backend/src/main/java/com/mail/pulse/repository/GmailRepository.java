@@ -18,22 +18,30 @@ public interface GmailRepository extends JpaRepository<GmailEntity, String>, Jpa
 
 
 
-    public default List<GmailEntity> searchInbox(String sender, String subject, Instant dateSent) {
-        Specification<GmailEntity> spec = Specification.where((root, query, cb) -> cb.conjunction());
+    public default Page<GmailEntity> searchInbox(
+            String sender,
+            String subject,
+            Instant dateSent,
+            Pageable pageable) {
 
-        if (sender != null && !sender.isEmpty()) {
-            spec = spec.and((root, query, cb) -> cb.equal(root.get("sender"), sender));
+        Specification<GmailEntity> spec = Specification.where((Specification<GmailEntity>) null);
+
+        if (sender != null && !sender.isBlank()) {
+            spec = spec.and((root, query, cb) ->
+                    cb.like(cb.lower(root.get("sender")), "%" + sender.toLowerCase() + "%"));
+        }
+
+        if (subject != null && !subject.isBlank()) {
+            spec = spec.and((root, query, cb) ->
+                    cb.like(cb.lower(root.get("subject")), "%" + subject.toLowerCase() + "%"));
         }
 
         if (dateSent != null) {
-            spec = spec.and((root, query, cb) -> cb.greaterThan(root.get("dateSent"), dateSent));
+            spec = spec.and((root, query, cb) ->
+                    cb.greaterThanOrEqualTo(root.get("dateSent"), dateSent));
         }
 
-        if (subject != null && !subject.isEmpty()) {
-            spec = spec.and((root, query, cb) -> cb.like(cb.lower(root.get("subject")), "%" + subject.toLowerCase() + "%"));
-        }
-
-        return findAll(spec);
+        return findAll(spec, pageable);
     }
 
     @Query("SELECT new com.mail.pulse.dto.EmailSummary(" +

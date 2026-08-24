@@ -7,12 +7,14 @@ import com.mail.pulse.dto.EmailSummary;
 import com.mail.pulse.entity.GmailEntity;
 import com.mail.pulse.service.GmailService;
 import jakarta.mail.MessagingException;
+import jakarta.mail.Multipart;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.web.multipart.MultipartFile;
 
 import java.io.File;
 import java.io.IOException;
@@ -32,8 +34,7 @@ public class GmailController {
     public record EmailParams(
             String toEmailAddress,
             String subject,
-            String bodyText,
-            List<File> files // Note: Replace File with MultipartFile or Base64 string for proper REST uploads
+            String bodyText
     ) {}
 
     public GmailController(GmailService gmailService, Gmail gmailClient) {
@@ -51,10 +52,25 @@ public class GmailController {
         }
     }
 
+    @GetMapping("/{messageId}/attachments/{attachmentId}")
+    public ResponseEntity<byte[]> getAttachment(
+            @PathVariable("messageId") String messageId,
+            @PathVariable("attachmentId") String attachmentId) {
+        try {
+            byte[] data = gmailService.getAttachmentData(messageId, attachmentId);
+            return ResponseEntity.ok()
+                    .header("Content-Disposition", "attachment")
+                    .body(data);
+        } catch (Exception e) {
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).build();
+        }
+    }
+
     @PostMapping("/{id}/save")
     public ResponseEntity<String> saveEmail(@PathVariable("id") String id) {
         try {
-            gmailService.saveEmail(id);
+            String userEmail = gmailClient.users().getProfile("me").execute().getEmailAddress();
+            gmailService.saveEmail(id, userEmail);
             return ResponseEntity.ok("Email saved successfully");
         } catch (Exception e) {
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
@@ -71,20 +87,6 @@ public class GmailController {
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).build();
         }
     }
-    @PostMapping("/sync-new")
-    public ResponseEntity<String> syncNewEmail() {
-        if (gmailService.isIncrementalSyncRunning()) {
-            return ResponseEntity.status(HttpStatus.CONFLICT)
-                    .body("Incremental sync is already running.");
-        }
-        try {
-            gmailService.syncNewEmails();
-            return ResponseEntity.ok("Incremental sync started successfully.");
-        } catch (Exception e) {
-            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
-                    .body("Failed to start incremental sync: " + e.getMessage());
-        }
-    }
 
     @GetMapping("/summaries")
     public Page<EmailSummary> getEmailSummaries(
@@ -96,31 +98,6 @@ public class GmailController {
         return gmailService.getSummaries(pageable);
     }
 
-    @PostMapping("/sync-new/stop")
-    public ResponseEntity<String> stopIncrementalSync() {
-        try {
-            boolean stopped = gmailService.stopIncrementalSync();
-            if (stopped) {
-                return ResponseEntity.ok("Incremental sync stop requested.");
-            } else {
-                return ResponseEntity.ok("Incremental sync was not running.");
-            }
-        } catch (Exception e) {
-            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
-                    .body("Failed to stop incremental sync: " + e.getMessage());
-        }
-    }
-
-    @GetMapping("/sync-new/check")
-    public ResponseEntity<Boolean> checkIncrementalSync() {
-        try {
-            boolean isRunning = gmailService.isIncrementalSyncRunning();
-            return ResponseEntity.ok(isRunning);
-        } catch (Exception e) {
-            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).build();
-        }
-    }
-
     @PostMapping("/save-all")
     public ResponseEntity<String> saveAllEmails() {
         if (gmailService.isFullSyncRunning()) {
@@ -128,7 +105,8 @@ public class GmailController {
                     .body("Full sync is already running.");
         }
         try {
-            gmailService.saveAllEmails();
+            String userEmail = gmailClient.users().getProfile("me").execute().getEmailAddress();
+            gmailService.saveAllEmails(userEmail);
             return ResponseEntity.ok("Full sync started successfully.");
         } catch (Exception e) {
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
@@ -162,18 +140,18 @@ public class GmailController {
     }
 
     @PostMapping("/drafts")
-    public ResponseEntity<Draft> createDraft(@RequestBody EmailParams request) {
+    public ResponseEntity<Draft> createDraft(@RequestPart EmailParams request, @RequestPart List<MultipartFile> files) {
         try {
             String senderEmail = getCurrentUserEmail();
             Draft draft;
 
-            if (request.files() != null && !request.files().isEmpty()) {
+            if (files != null && !files.isEmpty()) {
                 draft = gmailService.createDraftWithAttachment(
                         request.toEmailAddress(),
                         senderEmail,
                         request.subject(),
                         request.bodyText(),
-                        request.files()
+                        files
                 );
             } else {
                 draft = gmailService.createDraft(
@@ -190,15 +168,15 @@ public class GmailController {
     }
 
     @PostMapping("/send")
-    public ResponseEntity<Map<String, Object>> sendEmailDirectly(@RequestBody EmailParams request) {
+    public ResponseEntity<Map<String, Object>> sendEmailDirectly(@RequestPart EmailParams request, @RequestPart(required = false) List<MultipartFile> files) {
         Map<String, Object> response = new HashMap<>();
 
         try {
             String senderEmail = getCurrentUserEmail();
 
-            Message sentMessage = (request.files() != null && !request.files().isEmpty())
+            Message sentMessage = (files != null && !files.isEmpty())
                     ? gmailService.sendEmailWithAttachmentsDirectly(
-                    request.toEmailAddress(), senderEmail, request.subject(), request.bodyText(), request.files())
+                    request.toEmailAddress(), senderEmail, request.subject(), request.bodyText(), files)
                     : gmailService.sendEmailDirectly(
                     request.toEmailAddress(), senderEmail, request.subject(), request.bodyText());
 

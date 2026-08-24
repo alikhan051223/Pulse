@@ -1,11 +1,9 @@
 package com.mail.pulse.entity;
 
 
-import jakarta.persistence.Entity;
-import jakarta.persistence.GeneratedValue;
-import jakarta.persistence.GenerationType;
-import jakarta.persistence.Id;
-import jakarta.persistence.Table;
+import com.fasterxml.jackson.annotation.JsonIgnore;
+import jakarta.persistence.*;
+import lombok.AllArgsConstructor;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
 import lombok.Setter;
@@ -14,6 +12,7 @@ import lombok.Setter;
 @Getter
 @Setter
 @NoArgsConstructor
+@AllArgsConstructor
 @Table(name = "attachments")
 public class Attachment {
 
@@ -22,8 +21,20 @@ public class Attachment {
     private String id;
 
     private String fileName;
-    private String attachmentID;
 
+    @Column(columnDefinition = "TEXT")
+    private String attachmentId;
 
+    private Long size;
+    private String contentType;
+    private String contentId;
+
+    @Column(columnDefinition = "BOOLEAN DEFAULT 0")
+    private boolean inline;
+
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "email_id")
+    @JsonIgnore
+    private GmailEntity email;
 }
 
