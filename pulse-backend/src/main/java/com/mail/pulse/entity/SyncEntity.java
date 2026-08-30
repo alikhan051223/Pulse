@@ -8,28 +8,20 @@ import lombok.Getter;
 import lombok.NoArgsConstructor;
 import lombok.Setter;
 
+import java.math.BigInteger;
 import java.time.Instant;
 
 @Entity
 @Getter
 @Setter
 @NoArgsConstructor
-@Table(name = "token")
-public class Token {
-
-
+@Table(name = "sync")
+public class SyncEntity {
     @Id
-    private String userID;
+    private String userId;
 
-    private String token;
+    private BigInteger lastHistoryId;
 
-    private Instant savedAt;
-
-    public Token(String userID) {
-        this.userID = userID;
-
-    }
-
-
+    private Instant timeSaved;
 
 }

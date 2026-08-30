@@ -21,7 +21,7 @@ public class GmailEntity {
     @Id
     private String id;
 
-    private String userEmail;
+    private String recipient;
 
     private String sender;
 
@@ -33,7 +33,27 @@ public class GmailEntity {
 
     private Instant dateSent;
 
+    private String historyId;
 
+    private boolean draft;
+
+    private boolean trash;
+
+    private boolean unread;
+
+    private boolean inbox;
+
+    private boolean spam;
+
+    private boolean sent;
+
+    @ElementCollection
+    @CollectionTable(name = "email_cc", joinColumns = @JoinColumn(name = "email_id"))
+    private List<String> cc = new ArrayList<>();
+
+    @ElementCollection
+    @CollectionTable(name = "email_labels", joinColumns = @JoinColumn(name = "email_id"))
+    private List<String> labels = new ArrayList<>();
 
     @Column(columnDefinition = "TEXT")
     private String htmlBody;
@@ -48,7 +68,6 @@ public class GmailEntity {
         attachments.add(attachment);
         attachment.setEmail(this);
     }
-
 
     public void removeAttachment(Attachment attachment) {
         attachments.remove(attachment);
