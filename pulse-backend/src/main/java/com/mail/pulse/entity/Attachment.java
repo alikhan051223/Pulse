@@ -25,6 +25,8 @@ public class Attachment {
     @Column(columnDefinition = "TEXT")
     private String attachmentId;
 
+    private String messageId;
+
     private Long size;
     private String contentType;
     private String contentId;

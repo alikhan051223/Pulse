@@ -1,11 +1,20 @@
 package com.mail.pulse.dto;
 
-import java.time.Instant;
+import com.mail.pulse.entity.Attachment;
 
-    public record EmailSummary(
-            String emailID,
-            String fromEmailAddress,
-            String subject,
-            Instant dateSent,
-            String snippet
-    ) {}
+import java.time.Instant;
+import java.util.List;
+
+public record EmailSummary(
+        String emailID,
+        String fromEmailAddress,
+        String subject,
+        Instant dateSent,
+        String snippet,
+        List<Attachment> attachments
+) {
+    // Compact constructor ensures attachments is never null for React
+    public EmailSummary {
+        attachments = (attachments != null) ? attachments : List.of();
+    }
+}

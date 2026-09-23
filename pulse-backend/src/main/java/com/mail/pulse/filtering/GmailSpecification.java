@@ -59,7 +59,7 @@ public class GmailSpecification {
             if (filter.getRecipient() != null && !filter.getRecipient().isBlank()) {
                 String recipientTerm = "%" + filter.getRecipient().trim().toLowerCase() + "%";
 
-                Predicate userEmailMatch = cb.like(cb.lower(root.get("userEmail")), recipientTerm);
+                Predicate userEmailMatch = cb.like(cb.lower(root.get("recipient")), recipientTerm);
 
                 Expression<String> ccExpression = root.joinList("cc", JoinType.LEFT).as(String.class);
                 Predicate ccMatch = cb.like(cb.lower(ccExpression), recipientTerm);
@@ -82,6 +82,10 @@ public class GmailSpecification {
                 predicates.add(cb.equal(labelsJoin, filter.getLabel().trim()));
             }
 
+            if (filter.getInboxOwner() != null && !filter.getInboxOwner().isBlank()) {
+                predicates.add(cb.equal(root.get("inboxOwner"), filter.getInboxOwner().trim()));
+            }
+
             // 7. Dynamic Date Range Filtering
             if (filter.getStartDate() != null && filter.getEndDate() != null) {
                 predicates.add(cb.between(root.get("dateSent"), filter.getStartDate(), filter.getEndDate()));
@@ -91,7 +95,6 @@ public class GmailSpecification {
                 predicates.add(cb.lessThanOrEqualTo(root.get("dateSent"), filter.getEndDate()));
             }
 
-            // Ensures distinct results if joins (cc, labels) created duplicate parent rows
             query.distinct(true);
 
             return cb.and(predicates.toArray(new Predicate[0]));

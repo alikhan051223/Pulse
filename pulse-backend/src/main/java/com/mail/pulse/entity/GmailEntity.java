@@ -21,6 +21,8 @@ public class GmailEntity {
     @Id
     private String id;
 
+    private String inboxOwner;
+
     private String recipient;
 
     private String sender;

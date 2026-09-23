@@ -10,9 +10,15 @@ import java.util.Optional;
 @Repository
 public interface GmailRepository extends JpaRepository<GmailEntity, String>, JpaSpecificationExecutor<GmailEntity> {
 
-    public void deleteByRecipient(String userEmail);
+    void deleteByInboxOwner(String inboxOwner);
 
-    public void deleteByRecipientAndDraftTrue(String userEmail);
+    void deleteByInboxOwnerAndDraftTrue(String inboxOwner);
+
+    boolean existsByIdAndInboxOwner(String id, String inboxOwner);
+
+    Optional<GmailEntity> findByIdAndInboxOwnerAndDraftFalse(String id, String inboxOwner);
+
+    public void deleteBySender(String userEmail);
 
     Optional<GmailEntity> findByIdAndDraftFalse(String id);
     Optional<GmailEntity> findByIdAndDraftTrue(String id);

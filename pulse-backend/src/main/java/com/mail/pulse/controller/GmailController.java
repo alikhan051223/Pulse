@@ -1,24 +1,21 @@
 package com.mail.pulse.controller;
 
+import com.mail.pulse.dto.EmailFilter;
 import com.mail.pulse.dto.EmailParams;
-import com.google.api.services.gmail.Gmail;
 import com.google.api.services.gmail.model.Draft;
 import com.google.api.services.gmail.model.Message;
-import com.mail.pulse.entity.Attachment;
+import com.mail.pulse.dto.EmailSummary;
 import com.mail.pulse.entity.GmailEntity;
 import com.mail.pulse.service.GmailService;
 import jakarta.mail.MessagingException;
-import org.springframework.http.HttpHeaders;
-import org.springframework.http.HttpStatus;
-import org.springframework.http.MediaType;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
 
 import java.io.IOException;
-import java.util.HashMap;
 import java.util.List;
-import java.util.Map;
 
 @RestController
 @RequestMapping("/api/emails")
@@ -31,8 +28,8 @@ public class GmailController {
 
     }
 
-    @GetMapping("/{id}")
-    public ResponseEntity<GmailEntity> getEmailById(@PathVariable String id) {
+    @GetMapping("/{id}") // used
+    public ResponseEntity<GmailEntity> getEmailById(@PathVariable String id) throws IOException {
         return ResponseEntity.ok(gmailService.getEmailById(id));
     }
 
@@ -85,41 +82,13 @@ public class GmailController {
         return ResponseEntity.noContent().build();
     }
 
-
-    /*
-    @GetMapping("/summaries")
-    public Page<EmailSummary> getEmailSummaries(
-            @RequestParam(defaultValue = "0") int page,
-            @RequestParam(defaultValue = "20") int size) {
-
-        Pageable pageable = PageRequest.of(page, size);
-
-        return gmailService.getSummaries(pageable);
-    }
-
-    @GetMapping("/draft/summaries")
-    public Page<EmailSummary> getDraftSummaries(
-            @RequestParam(defaultValue = "0") int page,
-            @RequestParam(defaultValue = "20") int size) {
-
-        Pageable pageable = PageRequest.of(page, size);
-
-        return gmailService.getDraftSummaries(pageable);
-    } */
-
-    @PostMapping("/sync/initial")
-    public ResponseEntity<Void> initialSync() {
-        gmailService.initialSync();
-        return ResponseEntity.accepted().build();
-    }
-
-    @PostMapping("/sync/stop")
+    @PostMapping("/sync/stop") // used
     public ResponseEntity<Boolean> stopFullSync() {
             boolean stopped = gmailService.stopFullSync();
            return ResponseEntity.ok(stopped);
     }
 
-    @GetMapping("/sync/check")
+    @GetMapping("/sync/check") // used
     public ResponseEntity<Boolean> checkSync() {
             boolean isRunning = gmailService.isFullSyncRunning();
            return ResponseEntity.ok(isRunning);
@@ -147,7 +116,7 @@ public class GmailController {
             return ResponseEntity.ok(draft);
     }
 
-    @PostMapping("/send")
+    @PostMapping("/send") // used
     public ResponseEntity<Message> sendEmailDirectly(@RequestPart EmailParams request, @RequestPart(required = false) List<MultipartFile> files) throws MessagingException, IOException {
             Message sentMessage = (files != null && !files.isEmpty())
                     ? gmailService.sendEmailWithAttachmentsDirectly(
@@ -164,10 +133,16 @@ public class GmailController {
     }
 
 
-    @PostMapping("/sync")
+    @PostMapping("/sync") // used
     public ResponseEntity<Void> sync() throws IOException, InterruptedException {
-        gmailService.sync();
-        return ResponseEntity.noContent().build();
+        gmailService.startSync();
+        return ResponseEntity.accepted().build();
+    }
+
+    @GetMapping("/summaries") // used
+    public ResponseEntity<Page<EmailSummary>> getEmailSummaries(EmailFilter filter, Pageable pageable) throws IOException {
+        Page<EmailSummary> es = gmailService.getEmailSummaries(filter, pageable);
+        return ResponseEntity.ok(es);
     }
 
 }

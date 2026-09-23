@@ -51,44 +51,18 @@ public class GmailService {
     private final Gmail gmailClient;
     private final AtomicBoolean fullSyncRunning = new AtomicBoolean(false);
     private final SyncRepository syncRepository;
-    public GmailService(GmailRepository gmailRepository, Gmail gmailClient, SyncRepository syncRepository) {
+    private final ClearDatabase clearDatabase;
+    public GmailService(GmailRepository gmailRepository, Gmail gmailClient, SyncRepository syncRepository, ClearDatabase clearDatabase) {
         this.gmailRepository = gmailRepository;
         this.gmailClient = gmailClient;
         this.syncRepository = syncRepository;
+        this.clearDatabase = clearDatabase;
     }
 
 
-    @Async
-    public void initialSync() {
-        // Attempt to acquire execution lock for the entire sync process
-        if (!fullSyncRunning.compareAndSet(false, true)) {
-            log.info("Full sync requested, but another sync process is already running.");
-            return;
-        }
-
-        try {
-            log.info("Starting initial sync (Drafts and Emails)...");
-
-            fetchAndSaveAllDrafts();
-
-            if (fullSyncRunning.get()) {
-                fetchAndSaveAllEmails();
-            }
-
-            log.info("Initial sync completed successfully.");
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-            log.error("Initial sync interrupted", e);
-        } catch (IOException e) {
-            log.error("Network or API error during initial sync: {}", e.getMessage(), e);
-        } finally {
-
-            fullSyncRunning.set(false);
-        }
-    }
-
-    public Page<EmailSummary> getEmailSummaries(EmailFilter filter, Pageable pageable) {
+    public Page<EmailSummary> getEmailSummaries(EmailFilter filter, Pageable pageable) throws IOException {
         // 1. Build the specification dynamically from the filter
+        filter.setInboxOwner(gmailClient.users().getProfile("me").execute().getEmailAddress());
         Specification<GmailEntity> spec = GmailSpecification.build(filter);
 
         // 2. Query the repository and map entities to EmailSummary DTOs
@@ -98,7 +72,8 @@ public class GmailService {
                         entity.getSender(),
                         entity.getSubject(),
                         entity.getDateSent(),
-                        entity.getSnippet()
+                        entity.getSnippet(),
+                        entity.getAttachments()
                 ));
     }
 
@@ -120,6 +95,7 @@ public class GmailService {
     public void unTrashDraft(String id) throws IOException {
         gmailClient.users().messages().untrash("me", id).execute();
     }
+
 
     public Draft createDraft(String to, String subject, String body)
             throws MessagingException, IOException {
@@ -152,7 +128,7 @@ public class GmailService {
     }
 
     @Transactional
-    public void saveDraft(String draftId) throws IOException {
+    public void saveDraft(String draftId, String inboxOwner) throws IOException {
         // 1. Fetch from API using the DRAFT ID
         Draft draft = gmailClient.users().drafts().get("me", draftId).execute();
         Message message = draft.getMessage();
@@ -165,8 +141,9 @@ public class GmailService {
         String cc = getCCfromHeaders(message.getPayload().getHeaders());
         String hBody = getHtmlFromMessage(message.getPayload());
         String pBody = getPlainTextFromMessage(message.getPayload());
-        extractAttachments(message.getPayload(), attachmentCollector);
-        pulseMessage.setId(message.getId());
+        extractAttachments(message.getId(), message.getPayload(), attachmentCollector);
+        pulseMessage.setId(draftId);
+        pulseMessage.setInboxOwner(inboxOwner);
         pulseMessage.setRecipient(getRecipientFromHeaders(message.getPayload().getHeaders()));
         pulseMessage.setDateSent(message.getInternalDate() != null
                 ? Instant.ofEpochMilli(message.getInternalDate())
@@ -209,14 +186,12 @@ public class GmailService {
         }
     } */
 
-    private void fetchAndSaveAllDrafts() throws IOException, InterruptedException {
+    private void fetchAndSaveAllDrafts(String userEmail) throws IOException, InterruptedException {
         String token = null;
 
         while (fullSyncRunning.get()) {
             var request = gmailClient.users().drafts().list("me").setMaxResults(500L);
-            if (token != null) {
-                request.setPageToken(token);
-            }
+            if (token != null) request.setPageToken(token);
 
             ListDraftsResponse response = request.execute();
             List<Draft> drafts = response.getDrafts();
@@ -225,19 +200,21 @@ public class GmailService {
                 for (Draft draft : drafts) {
                     if (!fullSyncRunning.get()) break;
 
-                    if (draft.getMessage() != null && gmailRepository.existsById(draft.getMessage().getId())) {
+                    if (gmailRepository.existsByIdAndInboxOwner(draft.getId(), userEmail)) {
                         continue;
                     }
                     try {
-                        saveDraft(draft.getId());
+                        saveDraft(draft.getId(), userEmail);
                         Thread.sleep(300);
+                    } catch (IOException e) {
+                        log.warn("Failed to save draft {}: {}", draft.getId(), e.getMessage());
                     } catch (InterruptedException e) {
                         Thread.currentThread().interrupt();
-                        log.error("Draft sync interrupted: {}", e.getMessage(), e);
+                        log.error("Draft sync interrupted", e);
+                        break;
                     }
                 }
             }
-
             token = response.getNextPageToken();
             if (token == null) break;
         }
@@ -252,6 +229,7 @@ public class GmailService {
         }
     }
 
+    @Transactional
     public void deleteDraft(String id) throws IOException {
         gmailClient.users().drafts().delete("me", id).execute();
         GmailEntity email = gmailRepository.findByIdAndDraftTrue(id).orElseThrow();
@@ -267,15 +245,28 @@ public class GmailService {
     }
 
 
-    public GmailEntity getEmailById(String id) {
-        return gmailRepository.findByIdAndDraftFalse(id)
+    public GmailEntity getEmailById(String id) throws IOException {
+        return gmailRepository.findByIdAndInboxOwnerAndDraftFalse(id, gmailClient.users().getProfile("me").execute().getEmailAddress())
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Email not found"));
     }
 
 
     @Transactional
-    public void saveEmail(String id) throws IOException {
-        Message message = gmailClient.users().messages().get("me", id).execute();
+    public void saveEmail(String id, String inboxOwner) throws IOException {
+        Message message;
+        try {
+            message = gmailClient.users().messages().get("me", id).execute();
+        } catch (GoogleJsonResponseException e) {
+            if (e.getStatusCode() == 404) {
+                log.warn("Message {} was deleted on Gmail (404 Not Found). Skipping.", id);
+                gmailRepository.deleteById(id);
+                return;
+            }
+            throw e; // Re-throw any other errors (e.g. 500, 403, 429)
+        }
+        if (message.getLabelIds() != null && message.getLabelIds().contains("DRAFT")) {
+            return;
+        }
         GmailEntity pulseMessage = new GmailEntity();
         List<Attachment> attachmentCollector = new ArrayList<>();
         String subject = getSubjectFromHeaders(message.getPayload().getHeaders());
@@ -283,9 +274,10 @@ public class GmailService {
         String cc = getCCfromHeaders(message.getPayload().getHeaders());
         String hBody = getHtmlFromMessage(message.getPayload());
         String pBody = getPlainTextFromMessage(message.getPayload());
-        extractAttachments(message.getPayload(), attachmentCollector);
+        extractAttachments(message.getId(), message.getPayload(), attachmentCollector);
 
         pulseMessage.setId(message.getId());
+        pulseMessage.setInboxOwner(inboxOwner);
         pulseMessage.setRecipient(getRecipientFromHeaders(message.getPayload().getHeaders()));
         pulseMessage.setDateSent(message.getInternalDate() != null
                 ? Instant.ofEpochMilli(message.getInternalDate())
@@ -296,7 +288,11 @@ public class GmailService {
         pulseMessage.setSnippet(message.getSnippet());
         pulseMessage.setPlainTextBody(pBody);
         pulseMessage.setHtmlBody(hBody);
-        pulseMessage.setCc(List.of(cc.split(",")));
+        if (cc != null && !cc.isBlank()) {
+            pulseMessage.setCc(List.of(cc.split(",")));
+        } else {
+            pulseMessage.setCc(new ArrayList<>());
+        }
         pulseMessage.setDraft(false);
         pulseMessage.setLabels(message.getLabelIds());
         parseLabels(pulseMessage,message.getLabelIds());
@@ -309,57 +305,43 @@ public class GmailService {
         pulseMessage.setHistoryId(message.getHistoryId().toString());
         gmailRepository.save(pulseMessage);
     }
-/*
-    @Async
-    public void saveAllEmails() throws IOException, InterruptedException {
 
-        if (!fullSyncRunning.compareAndSet(false, true)) {
-            log.info("Full sync requested, but another process is already running.");
-            return;
-        }
 
-        try {
-            String userEmail = gmailClient.users().getProfile("me").execute().getEmailAddress();
-           fetchAndSaveAllEmails(userEmail);
-        } finally {
-            fullSyncRunning.set(false);
-        }
-    } */
-
-    private void fetchAndSaveAllEmails() throws IOException, InterruptedException {
+    private void fetchAndSaveAllEmails(String userEmail) throws IOException, InterruptedException {
         String token = null;
 
         while (fullSyncRunning.get()) {
-            Gmail.Users.Messages.List request = gmailClient.users().messages().list("me").setQ("-label:DRAFT").setIncludeSpamTrash(true).setMaxResults(500L);
-            if (token != null) {
-                request.setPageToken(token);
-            }
+            Gmail.Users.Messages.List request = gmailClient.users().messages().list("me")
+                    .setQ("-label:DRAFT")
+                    .setIncludeSpamTrash(true)
+                    .setMaxResults(500L);
+
+            if (token != null) request.setPageToken(token);
 
             ListMessagesResponse response = request.execute();
             List<Message> messages = response.getMessages();
 
             if (messages != null) {
                 for (Message message : messages) {
-                    if (!fullSyncRunning.get()) {
-                        break;
-                    }
-                    if (gmailRepository.existsById(message.getId())) {
+                    if (!fullSyncRunning.get()) break;
+
+                    if (gmailRepository.existsByIdAndInboxOwner(message.getId(), userEmail)) {
                         continue;
                     }
                     try {
-                        saveEmail(message.getId());
+                        saveEmail(message.getId(), userEmail);
                         Thread.sleep(300);
+                    } catch (IOException e) {
+                        log.warn("Failed to download email {}: {}", message.getId(), e.getMessage());
                     } catch (InterruptedException e) {
-                        log.error(e.getMessage(), e);
+                        Thread.currentThread().interrupt();
+                        log.error("Sync interrupted", e);
+                        break;
                     }
                 }
             }
-
             token = response.getNextPageToken();
-
-            if (token == null) {
-                break;
-            }
+            if (token == null) break;
         }
     }
 
@@ -368,7 +350,6 @@ public class GmailService {
         String from = gmailClient.users().getProfile("me").execute().getEmailAddress();
         MimeMessage mime = createEmail(to, from, subject, body);
         Message googleMessage = createMessageWithEmail(mime);
-
         return sendEmail(googleMessage);
     }
 
@@ -397,6 +378,7 @@ public class GmailService {
         gmailClient.users().messages().untrash("me", id).execute();
     }
 
+    @Transactional
     public void deleteEmail(String id) throws IOException {
         gmailClient.users().messages().delete("me", id).execute();
         GmailEntity email = gmailRepository.findByIdAndDraftFalse(id).orElseThrow();
@@ -407,20 +389,12 @@ public class GmailService {
     // Helper Methods
     // =========================================================================
 
-    public boolean stopFullSync() {
-        return fullSyncRunning.compareAndSet(true, false);
-    }
-
-    public boolean isFullSyncRunning() {
-        return fullSyncRunning.get();
-    }
-
     public byte[] getAttachmentData(String messageId, String attachmentId) throws IOException {
         MessagePartBody body = gmailClient.users().messages().attachments().get("me", messageId, attachmentId).execute();
         return Base64.decodeBase64(body.getData());
     }
 
-    public void extractAttachments(MessagePart messagePart, List<Attachment> attachments) {
+    public void extractAttachments(String messageID, MessagePart messagePart, List<Attachment> attachments) {
         if (messagePart == null) return;
         String n = messagePart.getFilename();
 
@@ -454,6 +428,7 @@ public class GmailService {
             x.setFileName(n != null ? n : "attachment");
             x.setInline(isInline);
             x.setContentId(contentId);
+            x.setMessageId(messageID);
             attachments.add(x);
 
         }
@@ -461,7 +436,7 @@ public class GmailService {
         List<MessagePart> mp = messagePart.getParts();
         if (mp != null) {
             for (MessagePart part : mp) {
-                extractAttachments(part, attachments);
+                extractAttachments(messageID, part, attachments);
             }
         }
     }
@@ -701,34 +676,66 @@ public class GmailService {
             return;
         }
         for (String label : labelIds) {
-            pulseMessage.getLabels().add(label);
+            if(!pulseMessage.getLabels().contains(label)){
+                pulseMessage.getLabels().add(label);
+            }
         }
     }
 
 // /////////////////////// History //////////////////////////////// //
 
-    public void sync() throws IOException, InterruptedException {
+    public boolean stopFullSync() {
+        return fullSyncRunning.compareAndSet(true, false);
+    }
 
+    public boolean isFullSyncRunning() {
+        return fullSyncRunning.get();
+    }
+
+    @Async
+    public void startSync() {
         if (!fullSyncRunning.compareAndSet(false, true)) {
-            log.info("Incremental sync requested, but another sync process is already running.");
+            log.info("Sync requested, but another sync process is already running.");
             return;
         }
-        String userEmail = gmailClient.users().getProfile("me").execute().getEmailAddress();
+        sync();
+    }
+
+    @Async
+    public void sync() {
+
+        String userEmail = null;
 
         try {
+            Profile user = gmailClient.users().getProfile("me").execute();
+            userEmail = user.getEmailAddress();
 
             SyncEntity syncEntity = syncRepository.findFirstByUserIdOrderByTimeSavedDesc(userEmail).orElse(null);
+
+            // 1. Initial Full Sync Path
             if (syncEntity == null) {
                 log.info("No sync history found for user {}. Triggering initial full sync.", userEmail);
-                fetchAndSaveAllEmails();
+                BigInteger startHistoryId = gmailClient.users().getProfile("me").execute().getHistoryId();
+                fetchAndSaveAllDrafts(userEmail);
+                fetchAndSaveAllEmails(userEmail);
+
+                if(!fullSyncRunning.get()){
+                    return;
+                }
+
+                SyncEntity syncE = new SyncEntity();
+                syncE.setLastHistoryId(startHistoryId);
+                syncE.setTimeSaved(Instant.now());
+                syncE.setUserId(userEmail);
+                syncRepository.save(syncE);
                 return;
             }
 
+            // 2. Incremental Sync Path
             BigInteger historyId = syncEntity.getLastHistoryId();
             String pageToken = null;
             BigInteger newHistoryId = historyId;
 
-            // 2. Outer loop checks fullSyncRunning on every page request
             while (fullSyncRunning.get()) {
                 var request = gmailClient.users().history().list("me")
                         .setMaxResults(500L)
@@ -738,16 +745,25 @@ public class GmailService {
                     request.setPageToken(pageToken);
                 }
 
-                ListHistoryResponse response = request.execute();
+                ListHistoryResponse response;
+                try {
+                    response = request.execute();
+                } catch (GoogleJsonResponseException e) {
+                    if (e.getStatusCode() == 404 || e.getStatusCode() == 400) {
+                        log.warn("History ID {} expired for user {}. Repopulating database...", historyId, userEmail);
+                        repopulateDatabase(userEmail);
+                        return;
+                    }
+                    throw e;
+                }
 
                 if (response.getHistory() != null) {
-                    // 3. Inner loop checks fullSyncRunning before processing each history item
                     for (History history : response.getHistory()) {
                         if (!fullSyncRunning.get()) {
                             log.info("Incremental sync stopped mid-processing for user {}", userEmail);
                             break;
                         }
-                        saveMessagesAdded(history);
+                        saveMessagesAdded(history, userEmail);
                         deleteMessagesDeleted(history);
                         addLabels(history);
                         removeLabels(history);
@@ -764,10 +780,10 @@ public class GmailService {
                 }
             }
 
-            // Only persist new state if sync wasn't stopped prematurely
+            // Persist new state if not cancelled
             if (fullSyncRunning.get()) {
-                gmailRepository.deleteByRecipientAndDraftTrue(userEmail);
-                fetchAndSaveAllDrafts(); // Call internal helper (without re-locking)
+                clearDatabase.clearDraftsForUser(userEmail);
+                fetchAndSaveAllDrafts(userEmail);
 
                 syncEntity.setLastHistoryId(newHistoryId);
                 syncRepository.save(syncEntity);
@@ -775,38 +791,40 @@ public class GmailService {
             }
 
         } catch (GoogleJsonResponseException e) {
-            if (e.getStatusCode() == 404 || e.getStatusCode() == 400) {
-                log.warn("History ID expired for user {}. Resetting database and re-syncing...", userEmail);
-                repopulateDatabase(userEmail);
-            } else {
-                log.error("Google API error during sync for user {}: {}", userEmail, e.getMessage(), e);
-                throw e;
-            }
+            log.error("Google API error during sync for user {}: {}", userEmail, e.getMessage(), e);
+        } catch (Exception e) {
+            log.error("Unexpected error during sync execution for user {}", userEmail, e);
         } finally {
-            // 4. Always release the lock
             fullSyncRunning.set(false);
         }
     }
 
-    @Transactional
     public void repopulateDatabase(String userEmail) throws IOException, InterruptedException {
-        gmailRepository.deleteByRecipient(userEmail);
-        syncRepository.deleteByUserId(userEmail);
-        fetchAndSaveAllEmails();
+        BigInteger startHistoryId = gmailClient.users().getProfile("me").execute().getHistoryId();
+        clearDatabase.clearUserData(userEmail);
+        fetchAndSaveAllEmails(userEmail);
+        fetchAndSaveAllDrafts(userEmail);
+
+        SyncEntity syncE = new SyncEntity();
+        syncE.setLastHistoryId(startHistoryId);
+        syncE.setTimeSaved(Instant.now());
+        syncE.setUserId(userEmail);
+        syncRepository.save(syncE);
     }
 
-    public void saveMessagesAdded(History history) throws IOException {
+
+    public void saveMessagesAdded(History history, String userEmail) throws IOException {
         List<HistoryMessageAdded> addedList = history.getMessagesAdded();
         if (addedList == null) return;
 
         for (HistoryMessageAdded messageAdded : addedList) {
             if (messageAdded.getMessage() != null) {
-                String id = messageAdded.getMessage().getId();
-                saveEmail(id);
+                saveEmail(messageAdded.getMessage().getId(), userEmail);
             }
         }
     }
 
+    @Transactional
     public void deleteMessagesDeleted(History history) {
         List<HistoryMessageDeleted> deletedList = history.getMessagesDeleted();
         if (deletedList == null) return;
@@ -818,6 +836,7 @@ public class GmailService {
         }
     }
 
+    @Transactional
     public void addLabels(History history) {
         List<HistoryLabelAdded> labelAddedList = history.getLabelsAdded();
         if (labelAddedList == null) return;
@@ -838,6 +857,7 @@ public class GmailService {
         }
     }
 
+    @Transactional
     public void removeLabels(History history) {
         List<HistoryLabelRemoved> labelRemovedList = history.getLabelsRemoved();
         if (labelRemovedList == null) return;
